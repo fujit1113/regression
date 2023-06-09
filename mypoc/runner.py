@@ -1,140 +1,287 @@
+# 標準ライブラリ
 import os
 import pickle
+from typing import Callable, Optional, Tuple, Union
 
+# サードパーティのライブラリ
 import numpy as np
 import pandas as pd
-from sklearn.metrics import log_loss, mean_squared_error
-from sklearn.model_selection import StratifiedKFold, KFold
-from typing import Callable, List, Optional, Tuple, Union
+import optuna
 from tqdm import tqdm
 
+# ローカルのライブラリ / アプリケーション
+from .config.config import config
+from .splitter import Splitter
 from .model import _Model
-from .util import Logger, Util
+from .validator import Validator
+from mypoc.utils.dumper_loader import DumperLoader
+from mypoc.utils.logger import Logger
 
 logger = Logger()
-_RANDOM_STATE: int = 3655
 
 
 class Runner:
-    def __init__(
-        self,
-        run_name: str,
-        model_cls: Callable[[str, dict], _Model],
-        features: List[str],
-        params: dict,
-        task: str = "classification",
-        n_fold: int = 5,
-    ):
-        """コンストラクタ
-
-        :param run_name: ランの名前
-        :param model_cls: モデルのクラス
-        :param features: 特徴量のリスト
-        :param params: ハイパーパラメータ
-        :param task: タスクの種類 ('classification' または 'regression')
-        :param n_fold: 交差検証のフォールド数
+    def __init__(self, validator: Validator):
         """
-        self.run_name = run_name
-        self.model_cls = model_cls
-        self.features = features
-        self.params = params
-        self.task = task
-        self.n_fold = n_fold
+        コンストラクタ
 
-    def train_fold(
-        self, i_fold: Union[int, str]
-    ) -> Tuple[_Model, Optional[np.array], Optional[np.array], Optional[float]]:
-        """クロスバリデーションでのfoldを指定して学習・評価する
-
-        他のメソッドから呼び出すほか、単体でも確認やパラメータ調整に用いる
-
-        :param i_fold: foldの番号（すべてのときには'all'とする）
-        :return: （モデルのインスタンス、レコードのインデックス、予測値、評価によるスコア）のタプル
+        Parameters
+        ----------
+        validator : Validator
+            条件: アトリビュート is_available が True
         """
-        # 学習データの読込
-        validation = i_fold != "all"
-        train_x = self.load_x_train()
-        train_y = self.load_y_train()
+        # 確認1: runner_params は妥当
+        if validator._is_available:
+            self.run_name = validator.run_name
+            self.task = validator.task
+            self.target = validator.target
+            self.additions = validator.additions
+            self.features = validator.features
+            self.description = validator.description
+            self.n_fold = validator.n_fold
+            self.models = validator.models
 
-        if validation:
-            # i_foldの妥当性をチェック
-            if not isinstance(i_fold, int) or i_fold < 0 or i_fold >= self.n_fold:
-                raise ValueError(
-                    f"i_fold should be a value between 0 and {self.n_fold - 1}. Got {i_fold} instead."
-                )
+            path_model = os.path.join(config["PATH_MODEL"], self.run_name)
+            os.makedirs(path_model, exist_ok=True)
 
-            # 学習データ・バリデーションデータをセットする
-            tr_idx, va_idx = self.load_index_fold(i_fold)
-            tr_x, tr_y = train_x.iloc[tr_idx], train_y.iloc[tr_idx]
-            va_x, va_y = train_x.iloc[va_idx], train_y.iloc[va_idx]
-
-            # 学習
-            model = self.build_model(i_fold)
-            model.train(tr_x, tr_y, va_x, va_y)
-
-            # バリデーションデータへの予測・評価
-            va_pred = model.predict(va_x)
-
-            # タスクによって評価指標を変更
-            if self.task == "classification":
-                score = log_loss(va_y, va_pred, eps=1e-15, normalize=True)
-            elif self.task == "regression":
-                score = mean_squared_error(va_y, va_pred)
-            else:
-                raise ValueError(f"Unknown task type: {self.task}")
-
-            # モデル、インデックス、予測値、評価を返す
-            return model, va_idx, va_pred, score
         else:
-            # 学習データ全てで学習
-            model = self.build_model(i_fold)
-            model.train(train_x, train_y)
+            raise ValueError(
+                "The provided Validator instance is not available. Please make sure the 'is_available' attribute of your Validator instance is set to True."
+            )
 
-            # モデルを返す
-            return model, None, None, None
-
-    def run_train_cv(self) -> None:
-        """クロスバリデーションで学習・評価
-
-        学習・評価とともに、各foldのモデルを保存、スコアをログ出力する
+    def run_train_cv(self) -> pd.DataFrame:
         """
+        クロスバリデーションで学習・評価。
+        損失関数値と評価指標の値を出力し、各フォールドのモデルを保存する。
+        """
+        # クロスバリデーション開始
         logger.info(f"{self.run_name} - start training cv")
 
-        scores = []
-        va_idxes = []
-        preds = []
-
-        # 各foldで学習
+        # 各フォールドで学習
         for i_fold in tqdm(range(self.n_fold), desc="Processing folds"):
-            # 学習
             logger.info(f"{self.run_name} fold {i_fold} - start training")
-            model, va_idx, va_pred, score = self.train_fold(i_fold)
-            logger.info(f"{self.run_name} fold {i_fold} - end training - score {score}")
+            self._train_fold(i_fold)
+            logger.info(f"{self.run_name} fold {i_fold} - end training")
+
+        # クロスバリデーション終了
+        logger.info(f"{self.run_name} - end training cv")
+
+    def _train_fold(
+        self,
+        i_fold: Union[int, str],
+        n_trials: int = config["N_TRIALS"],
+    ) -> None:
+        """
+        クロスバリデーションでフォールドを指定して学習・評価する。
+
+        Parameters
+        ----------
+        i_fold : Union[int, str]
+            フォールドの番号（すべてのときには'all'とする)
+
+        n_trials : int
+            ハイパーパラメータの探索回数
+
+        Returns
+        -------
+        pd.DataFrame
+            モデル名、損失関数値、評価指標をカラムにもつデータフレーム
+        """
+        # データをロード
+        validation = i_fold != "all"
+        train = DumperLoader.load_train(self.run_name)
+        train_x = train[self.features]
+        train_y = train[self.target]
+        train_z = train[self.additions]
+
+        if validation:
+            # 学習データ・バリデーションデータをロード・セット
+            tr_idx, va_idx = self.load_index_fold(i_fold)
+            tr_x, tr_y, tr_z = (
+                train_x.iloc[tr_idx],
+                train_y.iloc[tr_idx],
+                train_z.iloc[tr_idx],
+            )
+            va_x, va_y, va_z = (
+                train_x.iloc[va_idx],
+                train_y.iloc[va_idx],
+                train_z.iloc[va_idx],
+            )
+
+            self._train_models(i_fold, tr_x, tr_y, tr_z, va_x, va_y, va_z, n_trials)
+
+        # 全学習データで学習
+        else:
+            self._train_models(i_fold, train_x, train_y, train_z, n_trials)
+
+    def _train_models(
+        self,
+        i_fold: Union[int, str],
+        tr_x: pd.DataFrame,
+        tr_y: pd.DataFrame,
+        tr_z: pd.DataFrame,
+        va_x: Optional[pd.DataFrame] = None,
+        va_y: Optional[pd.DataFrame] = None,
+        va_z: Optional[pd.DataFrame] = None,
+        n_trials: int = config["N_TRIALS"],
+        random_seed: int = config["RANDOM_STATE"],
+    ) -> None:
+        """
+        交差検証のフォールドを指定してモデルを作る
+
+        Parameters
+        ----------
+        i_fold : Union[int, str]
+            交差検証のフォールド番号 (全データを使う場合は 'all')
+
+        tr_x : pd.DataFrame
+            訓練データの特徴量
+
+        tr_y : pd.DataFrame
+            訓練データの目的変数
+
+        tr_z : pd.DataFrame
+            訓練データのカスタム損失関数やカスタム評価関数に必要な変数
+
+        va_x : Optional[pd.DataFrame]
+            バリデーションデータの特徴量。
+
+        va_y : Optional[pd.DataFrame]
+            バリデーションデータの目的変数。
+
+        va_z : Optional[pd.DataFrame]
+            バリデーションデータの訓練データのカスタム損失関数やカスタム評価関数に必要な変数
+
+        n_trials : int
+            Optuna での試行回数
+
+        random_seed : int
+            乱数シード
+
+        Returns
+        -------
+        Tuple[list[str], list[float], Optional[list[float]], Optional[list[float]]]
+            モデル名のリスト、訓練データに対する損失関数値のリスト、バリデーションデータに対する損失関数値のリスト、
+            評価指標のリスト
+        """
+        # ラン名
+        validation = i_fold != "all"
+
+        for i, model in enumerate(self.models):
+            # 学習データに対するカスタム損失関数とカスタム評価関数をセット
+            if model.make_loss_func is not None:
+                model.loss_func_tr = model.make_loss_func(tr_z)
+
+            if validation:
+                if model.make_loss_func is not None:
+                    # バリデーションデータに対するカスタム損失関数をセット
+                    model.loss_func_va = model.make_loss_func(va_z)
+
+                if model.make_eval_func is not None:
+                    # バリデーションデータに対するカスタム評価関数をセット
+                    model.eval_func_va = model.make_eval_func(va_z)
+
+                # Optuna で最適なハイパーパラメータ探索
+                sampler = optuna.samplers.TPESampler(seed=random_seed)
+                study = optuna.create_study(sampler=sampler, direction="minimize")
+
+                try:
+                    study.optimize(
+                        lambda trial: self._objective(
+                            trial,
+                            model,
+                            tr_x,
+                            tr_y,
+                            va_x,
+                            va_y,
+                        ),
+                        n_trials=n_trials,
+                    )
+
+                except Exception as e:
+                    print(f"Optimization for model {i} failed with exception:\n{e}")
+                    continue
+
+                # 最適なハイパーパラメータで学習
+                try:
+                    model.train(tr_x, tr_y, va_x, va_y)
+                except Exception as e:
+                    print(
+                        f"Training for model {i} with validation failed with exception:\n{e}"
+                    )
+                    continue
+
+            else:
+                try:
+                    # 最適なハイパーパラメータで学習
+                    model.train(tr_x, tr_y, None, None, None)
+                except Exception as e:
+                    print(f"Training for model {i} failed with exception:\n{e}")
+                    continue
 
             # モデルを保存
+            model.model_name += f"_{i_fold}"
             model.save_model()
 
-            # 結果を保持
-            va_idxes.append(va_idx)
-            scores.append(score)
-            preds.append(va_pred)
+    def _objective(
+        self,
+        trial: optuna.trial.Trial,
+        model: _Model,
+        tr_x: pd.DataFrame,
+        tr_y: pd.DataFrame,
+        va_x: pd.DataFrame,
+        va_y: pd.DataFrame,
+    ):
+        """
+        Optuna を用いたハイパーパラメータ探索の目的関数。
+        訓練後に、バリデーションデータに対する損失関数値を返す。
 
-        # 各foldの結果をまとめる
-        va_idxes = np.concatenate(va_idxes)
-        order = np.argsort(va_idxes)
-        preds = np.concatenate(preds, axis=0)
-        preds = preds[order]
+        Parameters
+        ----------
+        trial : optuna.trial.Trial
+            Optuna が最適化するハイパーパラメータ
 
-        logger.info(f"{self.run_name} - end training cv - score {np.mean(scores)}")
+        model : _Model
+            モデルのクラス
 
-        # 予測結果の保存
-        Util.dump(preds, f"../model/pred/{self.run_name}-train.pkl")
+        tr_x : pd.DataFrame
+            訓練データの特徴量
 
-        # 評価結果の保存
-        logger.result_scores(self.run_name, scores)
+        tr_y : pd.DataFrame
+            訓練データの目的変数
+
+        va_x : pd.DataFrame
+            バリデーションデータの特徴量
+
+        va_y : pd.DataFrame
+            バリデーションデータの目的変数
+
+        Returns
+        -------
+        float
+            バリデーションデータに対する損失関数値
+        """
+        model.set_params(trial)
+        model.train(tr_x, tr_y, va_x, va_y)
+        va_pred = model.predict(va_x)
+        return model.loss(va_y, va_pred)
+
+    def run_train_all(self) -> pd.DataFrame:
+        """
+        学習データすべてで学習し、そのモデルを保存。
+        """
+        logger.info(f"{self.run_name} - start training all")
+        df = self._train_fold("all")
+        logger.info(f"{self.run_name} - end training all")
+
+        # 評価結果を保存
+        logger.result_scores(self.run_name, df)
+
+        return df
 
     def run_predict_cv(self) -> None:
-        """クロスバリデーションで学習した各foldのモデルの平均により、テストデータを予測する
+        """
+        クロスバリデーションで学習した各フォールドのモデルの平均により、テストデータを予測する
 
         あらかじめrun_train_cvを実行しておく必要がある
         """
@@ -157,20 +304,9 @@ class Runner:
         pred_avg = np.mean(preds, axis=0)
 
         # 予測結果の保存
-        Util.dump(pred_avg, f"../model/pred/{self.run_name}-test.pkl")
+        DumperLoader.dump(pred_avg, f"../model/pred/{self.run_name}-test.pkl")
 
         logger.info(f"{self.run_name} - end prediction cv")
-
-    def run_train_all(self) -> None:
-        """学習データすべてで学習し、そのモデルを保存"""
-        logger.info(f"{self.run_name} - start training all")
-
-        # 学習データ全てで学習
-        i_fold = "all"
-        model, _, _, _ = self.train_fold(i_fold)
-        model.save_model()
-
-        logger.info(f"{self.run_name} - end training all")
 
     def run_predict_all(self) -> None:
         """学習データすべてで学習したモデルでテストデータを予測
@@ -188,75 +324,41 @@ class Runner:
         pred = model.predict(test_x)
 
         # 予測結果の保存
-        Util.dump(pred, f"../model/pred/{self.run_name}-test.pkl")
+        DumperLoader.dump(pred, f"../model/pred/{self.run_name}-test.pkl")
 
         logger.info(f"{self.run_name} - end prediction all")
 
-    def build_model(self, i_fold: Union[int, str]) -> _Model:
-        """クロスバリデーションでのfoldを指定して、モデルを作成
-
-        :param i_fold: foldの番号
-        :return: モデルのインスタンス
+    def load_index_fold(
+        self,
+        i_fold: int,
+    ) -> np.array:
         """
-        # ラン名、fold、モデルのクラスからモデルを作成する
-        run_fold_name = f"{self.run_name}-{i_fold}"
-        return self.model_cls(run_fold_name, self.params)
+        クロスバリデーションでの fold 番号を指定して、対応するレコードのインデックスを返す
 
-    def load_x_train(self) -> pd.DataFrame:
-        """学習データの特徴量を読み込む
+        Parameters
+        ----------
+        i_fold : int
+            fold 番号
 
-        :return: 学習データの特徴量
-        """
-        # 学習データのロード
-        df = Runner.load_data("../input/train")
-
-        # 列名で抽出する以上のことを行う場合、このメソッドの修正が必要
-        return df[self.features]
-
-    def load_y_train(self) -> pd.Series:
-        """学習データの目的変数を読み込む
-
-        :return: 学習データの目的変数
-        """
-        # 学習データのロード
-        df = Runner.load_data("../input/train")
-
-        # 目的変数を読込む
-        train_y = df["target"]
-        train_y = np.array([int(st[-1]) for st in train_y]) - 1
-        train_y = pd.Series(train_y)
-        return train_y
-
-    def load_x_test(self) -> pd.DataFrame:
-        """テストデータの特徴量を読み込む
-
-        :return: テストデータの特徴量
-        """
-        # テストデータのロード
-        df = Runner.load_data("../input/test")
-
-        # 列名で抽出する以上のことを行う場合、このメソッドの修正が必要
-        return df[self.features]
-
-    def load_index_fold(self, i_fold: int) -> np.array:
-        """クロスバリデーションでのfoldを指定して対応するレコードのインデックスを返す
-
-        :param i_fold: foldの番号
-        :return: foldに対応するレコードのインデックス
+        Returns
+        -------
+        np.array
+            fold に対応するレコードのインデックス
         """
         # インデックス保存用のファイルパスを指定
-        index_file_path = f"../model/fold_indices.pkl"
+        index_file_path = f"../model/{self.run_name}/index_fold.pkl"
 
+        # すでにインデックスファイルが存在する場合、それをロード
         if os.path.exists(index_file_path):
-            # すでにインデックスファイルが存在する場合、それを読み込む
             with open(index_file_path, "rb") as f:
                 fold_indices = pickle.load(f)
 
         else:
             # 学習データ・バリデーションデータを分けるインデックスを返す
-            train_y = self.load_y_train()
+            train = DumperLoader.load_train(self.run_name)
+            train_y = train[self.target]
             dummy_x = np.zeros(len(train_y))
-            cv = Runner.k_fold(self.task, self.n_fold)
+            cv = Splitter.k_fold(self.task, self.n_fold)
             fold_indices = list(cv.split(dummy_x, train_y))
 
             # インデックスをファイルとして保存
@@ -264,77 +366,3 @@ class Runner:
                 pickle.dump(fold_indices, f)
 
         return fold_indices[i_fold]
-
-    @staticmethod
-    def load_data(path: str) -> pd.DataFrame:
-        """指定のデータを読み込む
-
-        :param path: データの相対パス (拡張子を除く)
-        :return: 指定のデータ
-        """
-        # データのパス
-        pkl_path = path + ".pkl"
-        csv_path = path + ".csv"
-
-        # pklファイルが存在するか確認
-        if os.path.exists(pkl_path):
-            df = pd.read_pickle(pkl_path)
-        else:
-            # pklが存在しない場合、csvから読み込む
-            df = pd.read_csv(csv_path)
-            # pklファイルを生成
-            df.to_pickle(pkl_path)
-
-        # 指定のデータを返す
-        return df
-
-    @staticmethod
-    def split_data(
-        path: str, task: str, test_size: float = 0.2, random_state: int = _RANDOM_STATE
-    ) -> None:
-        """データをテストデータと学習データに分ける
-        ※ コンペではなく、解析案件(テストデータが与えられていない)の場合
-
-        :param path: データの相対パス (拡張子を除く)
-        :param task: タスクの種類。'classification'または'regression'
-        :param test_size: テストデータの割合。
-        :param random_state: データ分割のランダムシード。
-        :return: 学習データとテストデータのタプル
-        """
-        # インデックス保存用のファイルパスを指定
-        df = Runner.load_data(path)
-
-        # 学習データ・テストデータを分けるインデックスを返す
-        X = df.drop("target", axis=1)
-        y = df["target"]
-        cv = Runner.k_fold(task, 1)
-        X_train, X_test, y_train, y_test = cv.split(X, y)
-
-        # インデックスで結合
-        train = X_train.join(y_train)
-        test = X_test.join(y_test)
-
-        # 保存
-        train.to_pickle(path + "train.pkl")
-        test.to_pickle(path + "test.pkl")
-
-    @staticmethod
-    def k_fold(task: str, n_fold: int) -> Union[StratifiedKFold, KFold]:
-        """指定されたタスクに基づいて適切な交差検証オブジェクトを作成
-
-        :param task: タスクの種類。"classification"または"regression"
-        :param n_fold: 分割するフォールドの数
-        :return: タスクに対応する交差検証オブジェクト。タスクが"classification"の場合はStratifiedKFold、"regression"の場合はKFoldオブジェクトを返します。
-        :raises ValueError: タスクが "classification" または "regression" 以外の場合。
-        """
-        # タスクごとの交差検証方法
-        if task == "classification":
-            cv = StratifiedKFold(
-                n_splits=n_fold, shuffle=True, random_state=_RANDOM_STATE
-            )
-        elif task == "regression":
-            cv = KFold(n_splits=n_fold, shuffle=True, random_state=_RANDOM_STATE)
-        else:
-            raise ValueError(f"Unknown task type: {task}")
-
-        return cv

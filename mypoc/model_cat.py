@@ -1,4 +1,5 @@
 import os
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -19,9 +20,19 @@ _PARAMS_CATBOOST_TUNED: dict = {
 
 
 class ModelCat(_Model):
+    def __init__(
+        self,
+        run_name: str,
+        fixed_hyperparams: dict,
+    ):
+        super().__init__(self, run_name, fixed_hyperparams)
+        self.model_name += "_cat"
+
     def train(self, tr_x, tr_y, va_x=None, va_y=None, categorical_cols=None):
         # カテゴリカル変数の選定
-        cat_features_indices = self.prepare_categorical_features(tr_x, categorical_cols)
+        cat_features_indices = self._prepare_categorical_features(
+            tr_x, categorical_cols
+        )
 
         # データのセット
         validation = va_x is not None
@@ -60,7 +71,7 @@ class ModelCat(_Model):
         model_path = os.path.join("../model/model", f"{self.run_fold_name}.model")
         self.model = Util.load(model_path)
 
-    def prepare_categorical_features(self, df: pd.DataFrame, categorical_cols=None):
+    def _prepare_categorical_features(self, df: pd.DataFrame, categorical_cols=None):
         # 所与のカテゴリカル変数のカラムの有無を確認
         if categorical_cols is not None:
             if not set(categorical_cols).issubset(df.columns):
@@ -69,15 +80,20 @@ class ModelCat(_Model):
                     f"Columns {missing_cols} do not exist in the pd.DataFrame instance"
                 )
 
-        # 所与のカテゴリカル変数が与えられていないとき
-        if categorical_cols is None:
-            categorical_cols = self.get_categorical_features(df)
+        # dfのカテゴリカル変数リストを取得
+        df_categorical_cols = self.get_categorical_features(df)
 
-        cat_features_indices = df.columns.get_indexer_for(categorical_cols)
-        return cat_features_indices
+        # 所与のカテゴリカル変数が与えられている場合、dfのカテゴリカル変数リストとマージ
+        if categorical_cols is not None:
+            categorical_cols = list(set(df_categorical_cols + categorical_cols))
+
+        else:
+            categorical_cols = df_categorical_cols
+
+        return df.columns.get_indexer_for(categorical_cols)
 
     @staticmethod
-    def get_categorical_features(df: pd.DataFrame):
+    def get_categorical_features(df: pd.DataFrame) -> Optional[List[str]]:
         categorical_cols = df.select_dtypes(
             include=["object", "category"]
         ).columns.tolist()

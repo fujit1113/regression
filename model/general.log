@@ -1,0 +1,72 @@
+[2023-05-29 22:41:33] - first - start training cv
+[2023-05-29 22:41:33] - first fold 0 - start training
+[2023-05-29 22:51:07] - first - start training cv
+[2023-05-29 22:51:07] - first fold 0 - start training
+[2023-05-29 23:00:53] - first - start training cv
+[2023-05-29 23:00:53] - first fold 0 - start training
+[2023-05-29 23:15:29] - first - start training cv
+[2023-05-29 23:15:29] - first fold 0 - start training
+[2023-05-29 23:21:05] - first - start training cv
+[2023-05-29 23:21:06] - first fold 0 - start training
+[2023-05-29 23:30:27] - first - start training cv
+[2023-05-29 23:30:27] - first fold 0 - start training
+[2023-05-29 23:38:06] - first - start training cv
+[2023-05-29 23:38:06] - first fold 0 - start training
+[2023-05-29 23:42:08] - first - start training cv
+[2023-05-29 23:42:08] - first fold 0 - start training
+[2023-05-29 23:44:22] - first - start training cv
+[2023-05-29 23:44:22] - first fold 0 - start training
+[2023-05-30 09:22:48] - first - start training cv
+[2023-05-30 09:22:48] - first fold 0 - start training
+[2023-05-30 15:58:11] - first - start training cv
+[2023-05-30 15:58:11] - first fold 0 - start training
+[2023-05-30 16:06:10] - first - start training cv
+[2023-05-30 16:06:10] - first fold 0 - start training
+[2023-05-30 16:08:54] - first - start training cv
+[2023-05-30 16:08:54] - first fold 0 - start training
+[2023-05-30 17:26:54] - first - start training cv
+[2023-05-30 17:26:54] - first fold 0 - start training
+[2023-06-06 10:44:31] - trial - start training cv
+[2023-06-06 10:44:31] - trial fold 0 - start training
+[2023-06-06 10:47:07] - trial - start training cv
+[2023-06-06 10:47:07] - trial fold 0 - start training
+[2023-06-06 10:51:53] - trial - start training cv
+[2023-06-06 10:51:53] - trial fold 0 - start training
+[2023-06-06 11:12:24] - trial - start training cv
+[2023-06-06 11:12:24] - trial fold 0 - start training
+[2023-06-06 11:17:23] - trial - start training cv
+[2023-06-06 11:17:23] - trial fold 0 - start training
+[2023-06-06 11:17:23] - trial fold 0 - end training
+[2023-06-06 11:17:23] - trial fold 1 - start training
+[2023-06-06 11:17:23] - trial fold 1 - end training
+[2023-06-06 11:17:23] - trial fold 2 - start training
+[2023-06-06 11:17:23] - trial fold 2 - end training
+[2023-06-06 11:17:23] - trial fold 3 - start training
+[2023-06-06 11:17:23] - trial fold 3 - end training
+[2023-06-06 11:17:23] - trial fold 4 - start training
+[2023-06-06 11:17:23] - trial fold 4 - end training
+[2023-06-06 11:17:23] - trial - end training cv
+[2023-06-06 19:37:05] - trial - start training cv
+[2023-06-06 19:37:05] - trial fold 0 - start training
+[2023-06-06 19:37:05] - trial fold 0 - end training
+[2023-06-06 19:37:05] - trial fold 1 - start training
+[2023-06-06 19:37:05] - trial fold 1 - end training
+[2023-06-06 19:37:05] - trial fold 2 - start training
+[2023-06-06 19:37:05] - trial fold 2 - end training
+[2023-06-06 19:37:05] - trial fold 3 - start training
+[2023-06-06 19:37:05] - trial fold 3 - end training
+[2023-06-06 19:37:05] - trial fold 4 - start training
+[2023-06-06 19:37:05] - trial fold 4 - end training
+[2023-06-06 19:37:05] - trial - end training cv
+2023-06-07 23:26:41,257 - general - INFO - [2023-06-07 23:26:41] - trial - start training cv
+2023-06-07 23:26:41,263 - general - INFO - [2023-06-07 23:26:41] - trial fold 0 - start training
+2023-06-07 23:26:41,281 - general - INFO - [2023-06-07 23:26:41] - trial fold 0 - end training
+2023-06-07 23:26:41,282 - general - INFO - [2023-06-07 23:26:41] - trial fold 1 - start training
+2023-06-07 23:26:41,296 - general - INFO - [2023-06-07 23:26:41] - trial fold 1 - end training
+2023-06-07 23:26:41,296 - general - INFO - [2023-06-07 23:26:41] - trial fold 2 - start training
+2023-06-07 23:26:41,311 - general - INFO - [2023-06-07 23:26:41] - trial fold 2 - end training
+2023-06-07 23:26:41,312 - general - INFO - [2023-06-07 23:26:41] - trial fold 3 - start training
+2023-06-07 23:26:41,328 - general - INFO - [2023-06-07 23:26:41] - trial fold 3 - end training
+2023-06-07 23:26:41,329 - general - INFO - [2023-06-07 23:26:41] - trial fold 4 - start training
+2023-06-07 23:26:41,344 - general - INFO - [2023-06-07 23:26:41] - trial fold 4 - end training
+2023-06-07 23:26:41,346 - general - INFO - [2023-06-07 23:26:41] - trial - end training cv
