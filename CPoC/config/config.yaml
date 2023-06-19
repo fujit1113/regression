@@ -1,0 +1,73 @@
+TASKS: 
+  - "regression"
+  - "binary"
+  - "multiclass"
+RANDOM_SEED: 3655
+TARGET: "target"
+N_TRIALS: 50
+TEST_SIZE: 0.2
+N_FOLD: 5
+PATH_MODEL: "../model"
+PATH_INPUT: "../input"
+PATH_GENERAL: "../model/general.log"
+PATH_RESULT: "../model/result.log"
+TUNABLE_PARAMS_LGB:
+  max_depth: 
+    low: -1
+    high: 50
+    type: "int"
+  min_data_in_leaf: 
+    low: 20
+    high: 200
+    type: "int"
+  feature_fraction: 
+    low: 0.4
+    high: 1.0
+    type: "float"
+  bagging_fraction: 
+    low: 0.4
+    high: 1.0
+    type: "float"
+  learning_rate: 
+    low: 0.001
+    high: 0.1
+    type: "float"
+  lambda_l1: 
+    low: 0.00000001
+    high: 10.0
+    type: "float"
+  lambda_l2: 
+    low: 0.00000001
+    high: 10.0
+    type: "float"
+  min_gain_to_split: 
+    low: 0.00000001
+    high: 1.0
+    type: "float"
+  num_boost_round: 
+    low: 100
+    high: 1000
+    type: "int"
+  early_stopping_rounds: 
+    low: 10
+    high: 50
+    type: "int"
+  max_bin: 
+    low: 255
+    high: 500
+    type: "int"
+UNTUNABLE_PARAMS_LGB:
+  objective:
+    - "regression"
+    - "regression_l1"
+    - "huber"
+    - "binary"
+    - "multiclass"
+  metric:
+    - "rmse"
+    - "mae"
+    - "logloss"
+    - "error"
+    - "auc"
+    - "multi_logloss"
+    - "multi_error"
